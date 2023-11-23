@@ -285,8 +285,7 @@ class LAD(nn.Module):
                                                       t_layerids=[-2])
         align_loss_all = align_loss_contrastive + align_loss_attmse
 
-        # reconstruction
-        reconstruct_loss_all = self.reconstruct(student[1], teacher, attention_mask,
+        reconstruct_loss_all = self.reconstruct(student[1], teacher, input_ids, attention_mask,
                                                 student_dense_other=self.student.dense_last_reconstruct,
                                                 queue=self.queue_token_last1)
 
@@ -447,6 +446,7 @@ def create_position_ids_from_input_ids(input_ids, padding_idx, past_key_values_l
     mask = input_ids.ne(padding_idx).int()
     incremental_indices = (torch.cumsum(mask, dim=1).type_as(mask) + past_key_values_length) * mask
     return incremental_indices.long() + padding_idx
+
 
 def embeddings_forward(self, input_ids, position_ids):
     input_shape = input_ids.size()
