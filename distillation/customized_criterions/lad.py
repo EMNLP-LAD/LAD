@@ -5,7 +5,6 @@ import torch.distributed as dist
 eps = 1e-7
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 
-
 class LAD(nn.Module):
     """
     memory buffer that supplies large amount of negative samples.
