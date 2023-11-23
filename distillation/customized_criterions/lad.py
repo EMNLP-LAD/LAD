@@ -197,13 +197,9 @@ class LAD(nn.Module):
         deleted_position_ids = expand_gather(position_ids, 1, deleted_indices)  # batch, num_delete
         masked_input_ids = (torch.ones_like(deleted_position_ids) * self.special_tok_ids["mask_token"]).long()
 
-        student_other_frommask = embeddings_forward(self.student.roberta.embeddings,
-                                                                                        input_ids=masked_input_ids,
-                                                                                        position_ids=deleted_position_ids)  # batch, num_delete, dim
-        student_other_original = expand_gather(student['last_hidden_state'], 1,
-                                               deleted_indices.unsqueeze(-1)).detach()
-        student_other = student_other_frommask + student_other_original
-
+        student_other = embeddings_forward(self.student.roberta.embeddings, input_ids=masked_input_ids,
+                                           position_ids=deleted_position_ids) + \
+                        expand_gather(student['last_hidden_state'], 1, deleted_indices.unsqueeze(-1)).detach()
 
         teacher_visible = expand_gather(teacher_rep, 1, remained_indices.unsqueeze(-1))
         teacher_other = expand_gather(teacher_rep, 1, deleted_indices.unsqueeze(-1))
