@@ -181,82 +181,7 @@ class LAD(nn.Module):
             loss += self.loss_mse(student_att, teacher_att)
         return loss
 
-    def reconstruct(self, student, teacher, attention_mask=None,
-                    student_dense_other=None, queue=None):
-        teacher_rep = teacher['hidden_states'][-1].detach()
-        teacher_encoder_lastlayer = self.teacher.roberta.encoder.layer[-1]
-
-        deleted_indices = torch.cat(student['all_remove_indices'], -1)
-        remained_indices = student['all_remain_indices'][-1]
-        student_visible = expand_gather(student['last_hidden_state'], 1, remained_indices.unsqueeze(-1))
-        student_other = expand_gather(student['last_hidden_state'], 1,
-                                      deleted_indices.unsqueeze(-1)).detach()
-        teacher_visible = expand_gather(teacher_rep, 1, remained_indices.unsqueeze(-1))
-        teacher_other = expand_gather(teacher_rep, 1, deleted_indices.unsqueeze(-1))
-
-        visible_mask = expand_gather(attention_mask, 1, remained_indices)  # batch, num_remain
-        deleted_mask = expand_gather(attention_mask, 1, deleted_indices)  # batch, num_deleted
-        all_mask = torch.cat([visible_mask, deleted_mask], dim=1)  # batch, num_remain + num_deleted
-        assert teacher_rep.shape[1] == \
-               (visible_mask.shape[1] + deleted_mask.shape[1]) == \
-               (student_visible.shape[1] + student_other.shape[1]) == (
-                           teacher_visible.shape[1] + teacher_other.shape[1])
-
-        all_mask = all_mask.long()
-        extended_final_attention_mask = all_mask[:, None, None, :]
-        extended_final_attention_mask = (1.0 - extended_final_attention_mask) * -10000.0
-        hidden_input = torch.cat([student_visible, student_other], dim=1)
-
-        layer_outputs, keep_indices, delete_indices = teacher_encoder_lastlayer(
-            hidden_states=student_dense_other(hidden_input),
-            attention_mask=extended_final_attention_mask,
-            output_attentions=True
-        )
-        hidden_predicted = layer_outputs[0]
-        attention_predicted = layer_outputs[1]
-        assert attention_predicted.shape[1] == 12
-
-        teacher_gold_rep = torch.cat([teacher_visible, teacher_other], dim=1)
-        # contrastive loss
-        loss_token_last_withmemory = self.token_contrastive_withmemory(hidden_predicted[:, 1:, :],
-                                                                       teacher_gold_rep[:, 1:, :],
-                                                                       all_mask[:, 1:],
-                                                                       queue=queue)
-
-        # attention loss
-        teacher_qkvs = teacher['qkvs'][-1]
-        num_attention_heads = 12
-        teacher_head_size = 768 // num_attention_heads
-        teacher_visible_qkv = [expand_gather(_.detach(), 1, remained_indices.unsqueeze(-1)) for _ in teacher_qkvs]
-        teacher_other_qkv = [expand_gather(_.detach(), 1, deleted_indices.unsqueeze(-1)) for _ in teacher_qkvs]
-
-        teacher_q = torch.cat([teacher_visible_qkv[0], teacher_other_qkv[0]], dim=1)
-        teacher_k = torch.cat([teacher_visible_qkv[1], teacher_other_qkv[1]], dim=1)
-        teacher_query_layer = transpose_for_scores(teacher_q, num_attention_heads=num_attention_heads,
-                                                   attention_head_size=teacher_head_size)
-        teacher_key_layer = transpose_for_scores(teacher_k, num_attention_heads=num_attention_heads,
-                                                 attention_head_size=teacher_head_size)
-        teacher_attention_scores = torch.matmul(teacher_query_layer, teacher_key_layer.transpose(-1, -2))
-        teacher_attention_scores = teacher_attention_scores / math.sqrt(teacher_head_size)
-        teacher_attention_scores += extended_final_attention_mask
-
-        student_att = attention_predicted[:, :, 1:, 1:]
-        teacher_att = teacher_attention_scores[:, :, 1:, 1:].detach()
-        student_att = torch.where(student_att <= -1e2, torch.zeros_like(student_att).to(student_att),
-                                  student_att)
-        teacher_att = torch.where(teacher_att <= -1e2, torch.zeros_like(teacher_att).to(teacher_att),
-                                  teacher_att)
-        att_loss = self.loss_mse(student_att, teacher_att)
-
-        # overall loss
-        loss = loss_token_last_withmemory + att_loss
-        if torch.isnan(loss):
-            print('NAN')
-            loss = 0.
-        return loss
-
-    # fixme
-    def reconstruct_with_maskemb(self, student, teacher, input_ids=None, attention_mask=None,
+    def reconstruct(self, student, teacher, input_ids=None, attention_mask=None,
                     student_dense_other=None, queue=None):
         teacher_rep = teacher['hidden_states'][-1].detach()
         teacher_encoder_lastlayer = self.teacher.roberta.encoder.layer[-1]
@@ -526,7 +451,6 @@ def create_position_ids_from_input_ids(input_ids, padding_idx, past_key_values_l
     mask = input_ids.ne(padding_idx).int()
     incremental_indices = (torch.cumsum(mask, dim=1).type_as(mask) + past_key_values_length) * mask
     return incremental_indices.long() + padding_idx
-
 
 def embeddings_forward(self, input_ids, position_ids):
     input_shape = input_ids.size()
